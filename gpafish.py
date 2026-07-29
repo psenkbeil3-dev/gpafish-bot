@@ -82,6 +82,17 @@ async def ban(ctx: commands.Context, member: discord.Member, *, reason: str = "N
     await member.ban(reason=reason)
     await ctx.send(f"**{member.display_name}** has been permanently banned. | Reason: {reason}")
 
+@bot.hybrid_command(name="unban", description="Unbans a user by their User ID.")
+@commands.guild_only()
+@commands.has_any_role("Moderator", "Admin")
+async def unban(ctx: commands.Context, user_id: str, *, reason: str = "No reason provided."):
+    try:
+        user = await bot.fetch_user(int(user_id))
+        await ctx.guild.unban(user, reason=reason)
+        await ctx.send(f"Successfully unbanned **{user.name}**.")
+    except Exception as e:
+        await ctx.send(f"Failed to unban user. Check the ID and try again.")
+
 @bot.hybrid_command(name="softban", description="Bans and unbans a user to clear their recent messages.")
 @commands.guild_only()
 @commands.has_any_role("Moderator", "Admin")
@@ -241,6 +252,13 @@ async def slowmode(ctx: commands.Context, seconds: int):
     else:
         await ctx.send(f"Channel slowmode set to **{seconds}** second(s).")
 
+@bot.hybrid_command(name="slowmodeoff", description="Disables slowmode in the current channel.")
+@commands.guild_only()
+@commands.has_any_role("Moderator", "Admin")
+async def slowmodeoff(ctx: commands.Context):
+    await ctx.channel.edit(slowmode_delay=0)
+    await ctx.send("Slowmode disabled for this channel.")
+
 @bot.hybrid_command(name="lock", description="Locks down the current text channel.")
 @commands.guild_only()
 @commands.has_any_role("Moderator", "Admin")
@@ -259,6 +277,32 @@ async def unlock(ctx: commands.Context):
     await ctx.channel.set_permissions(ctx.guild.default_role, overwrite=overwrite)
     await ctx.send("Channel has been unlocked.")
 
+@bot.hybrid_command(name="lockall", description="Locks all text channels in the server.")
+@commands.guild_only()
+@commands.has_any_role("Moderator", "Admin")
+async def lockall(ctx: commands.Context):
+    for channel in ctx.guild.text_channels:
+        overwrite = channel.overwrites_for(ctx.guild.default_role)
+        overwrite.send_messages = False
+        try:
+            await channel.set_permissions(ctx.guild.default_role, overwrite=overwrite)
+        except Exception:
+            continue
+    await ctx.send("Locked all accessible text channels.")
+
+@bot.hybrid_command(name="unlockall", description="Unlocks all text channels in the server.")
+@commands.guild_only()
+@commands.has_any_role("Moderator", "Admin")
+async def unlockall(ctx: commands.Context):
+    for channel in ctx.guild.text_channels:
+        overwrite = channel.overwrites_for(ctx.guild.default_role)
+        overwrite.send_messages = None
+        try:
+            await channel.set_permissions(ctx.guild.default_role, overwrite=overwrite)
+        except Exception:
+            continue
+    await ctx.send("Unlocked all accessible text channels.")
+
 @bot.hybrid_command(name="nickname", aliases=["nick"], description="Changes a member's server nickname.")
 @commands.guild_only()
 @commands.has_any_role("Moderator", "Admin")
@@ -268,6 +312,13 @@ async def nickname(ctx: commands.Context, member: discord.Member, *, nickname: s
         await ctx.send(f"Updated **{member.name}**'s nickname to **{nickname}**.")
     else:
         await ctx.send(f"Reset **{member.name}**'s nickname.")
+
+@bot.hybrid_command(name="nickreset", description="Resets a member's nickname to default.")
+@commands.guild_only()
+@commands.has_any_role("Moderator", "Admin")
+async def nickreset(ctx: commands.Context, member: discord.Member):
+    await member.edit(nick=None)
+    await ctx.send(f"Reset nickname for **{member.name}**.")
 
 @bot.hybrid_command(name="roleadd", description="Gives a role to a member.")
 @commands.guild_only()
@@ -314,6 +365,14 @@ async def ping(ctx: commands.Context):
     latency = round(bot.latency * 1000)
     await ctx.send(f"Pong! Response latency: **{latency}ms**")
 
+@bot.hybrid_command(name="botinfo", description="Displays details about the bot runtime.")
+async def botinfo(ctx: commands.Context):
+    embed = discord.Embed(title="Bot Statistics", color=discord.Color.green())
+    embed.add_field(name="Latency", value=f"{round(bot.latency * 1000)}ms", inline=True)
+    embed.add_field(name="Servers Joined", value=str(len(bot.guilds)), inline=True)
+    embed.add_field(name="Library", value=f"discord.py v{discord.__version__}", inline=True)
+    await ctx.send(embed=embed)
+
 @bot.hybrid_command(name="userinfo", description="Displays detailed profile information about a member.")
 @commands.guild_only()
 async def userinfo(ctx: commands.Context, member: discord.Member = None):
@@ -353,6 +412,37 @@ async def serverinfo(ctx: commands.Context):
 
     await ctx.send(embed=embed)
 
+@bot.hybrid_command(name="roleinfo", description="Shows information about a specific server role.")
+@commands.guild_only()
+async def roleinfo(ctx: commands.Context, role: discord.Role):
+    embed = discord.Embed(title=f"Role Info - {role.name}", color=role.color)
+    embed.add_field(name="Role ID", value=role.id, inline=True)
+    embed.add_field(name="Members Count", value=len(role.members), inline=True)
+    embed.add_field(name="Hoisted", value=role.hoist, inline=True)
+    embed.add_field(name="Created At", value=role.created_at.strftime("%b %d, %Y"), inline=False)
+    await ctx.send(embed=embed)
+
+@bot.hybrid_command(name="channelinfo", description="Shows information about the current text channel.")
+@commands.guild_only()
+async def channelinfo(ctx: commands.Context):
+    ch = ctx.channel
+    embed = discord.Embed(title=f"Channel Info - #{ch.name}", color=discord.Color.blue())
+    embed.add_field(name="Channel ID", value=ch.id, inline=True)
+    embed.add_field(name="Category", value=ch.category.name if ch.category else "None", inline=True)
+    embed.add_field(name="Slowmode", value=f"{ch.slowmode_delay}s", inline=True)
+    embed.add_field(name="Created On", value=ch.created_at.strftime("%b %d, %Y"), inline=False)
+    await ctx.send(embed=embed)
+
+@bot.hybrid_command(name="emojis", description="Lists custom emojis in this server.")
+@commands.guild_only()
+async def emojis(ctx: commands.Context):
+    emojis_list = [str(e) for e in ctx.guild.emojis]
+    if not emojis_list:
+        await ctx.send("This server has no custom emojis.")
+        return
+    output = " ".join(emojis_list[:50])
+    await ctx.send(f"Custom Server Emojis ({len(ctx.guild.emojis)} total):\n{output}")
+
 @bot.hybrid_command(name="avatar", aliases=["av"], description="Fetches a high-resolution display avatar.")
 async def avatar(ctx: commands.Context, member: discord.Member = None):
     target = member or ctx.author
@@ -362,6 +452,16 @@ async def avatar(ctx: commands.Context, member: discord.Member = None):
     )
     embed.set_image(url=target.display_avatar.url)
     await ctx.send(embed=embed)
+
+@bot.hybrid_command(name="avataruser", description="Fetches user avatar by User ID.")
+async def avataruser(ctx: commands.Context, user_id: str):
+    try:
+        user = await bot.fetch_user(int(user_id))
+        embed = discord.Embed(title=f"Avatar - {user.name}")
+        embed.set_image(url=user.display_avatar.url)
+        await ctx.send(embed=embed)
+    except Exception:
+        await ctx.send("Could not fetch user by ID.")
 
 @bot.hybrid_command(name="8ball", description="Ask a question and receive a magic 8-ball answer.")
 async def eightball(ctx: commands.Context, *, question: str):
@@ -389,6 +489,39 @@ async def roll(ctx: commands.Context, sides: int = 6):
         return
     result = random.randint(1, sides)
     await ctx.send(f"Rolled a d{sides}: **{result}**")
+
+@bot.hybrid_command(name="dice", description="Roll multiple dice using standard notation (e.g. 2d20).")
+async def dice(ctx: commands.Context, notation: str):
+    match = re.match(r'^(\d+)d(\d+)$', notation.lower().strip())
+    if not match:
+        await ctx.send("Format must be in dice notation like `2d6` or `1d20`.")
+        return
+    count, sides = int(match.group(1)), int(match.group(2))
+    if count > 20 or sides > 100 or count < 1 or sides < 2:
+        await ctx.send("Limit: 1-20 dice, 2-100 sides.")
+        return
+    rolls = [random.randint(1, sides) for _ in range(count)]
+    await ctx.send(f"Rolled `{notation}`: **{rolls}** (Total: **{sum(rolls)}**)")
+
+@bot.hybrid_command(name="rps", description="Play Rock, Paper, Scissors against the bot.")
+async def rps(ctx: commands.Context, choice: str):
+    user_choice = choice.lower().strip()
+    valid = ["rock", "paper", "scissors"]
+    if user_choice not in valid:
+        await ctx.send("Please choose: `rock`, `paper`, or `scissors`.")
+        return
+    bot_choice = random.choice(valid)
+    
+    if user_choice == bot_choice:
+        res = "It's a tie!"
+    elif (user_choice == "rock" and bot_choice == "scissors") or \
+         (user_choice == "paper" and bot_choice == "rock") or \
+         (user_choice == "scissors" and bot_choice == "paper"):
+        res = "You win!"
+    else:
+        res = "I win!"
+        
+    await ctx.send(f"You chose **{user_choice}**, I chose **{bot_choice}**. {res}")
 
 @bot.hybrid_command(name="poll", description="Creates a quick reaction poll.")
 @commands.guild_only()
@@ -423,9 +556,33 @@ async def ship(ctx: commands.Context, user1: discord.Member, user2: discord.Memb
     score = random.randint(0, 100)
     await ctx.send(f"Compatibility rating between **{user1.display_name}** and **{target2.display_name}**: **{score}%**")
 
+@bot.hybrid_command(name="roast", description="Delivers a friendly roast.")
+async def roast(ctx: commands.Context, member: discord.Member = None):
+    target = member or ctx.author
+    roasts = [
+        "Is your brain on low power mode?",
+        "I'd agree with you, but then we'd both be wrong.",
+        "You're like a cloud. When you disappear, it's a beautiful day.",
+        "You're proof that even mistakes can make it far."
+    ]
+    await ctx.send(f"{target.mention}, {random.choice(roasts)}")
+
+@bot.hybrid_command(name="calc", description="Performs basic calculation (+, -, *, /).")
+async def calc(ctx: commands.Context, expression: str):
+    try:
+        clean_expr = re.sub(r'[^0-9\+\-\*\/\.\(\)\s]', '', expression)
+        result = eval(clean_expr, {"__builtins__": None}, {})
+        await ctx.send(f"Result: `{result}`")
+    except Exception:
+        await ctx.send("Invalid mathematical expression.")
+
 @bot.hybrid_command(name="reverse", description="Reverses text.")
 async def reverse(ctx: commands.Context, *, text: str):
     await ctx.send(text[::-1])
+
+@bot.hybrid_command(name="say", description="Makes the bot repeat text.")
+async def say(ctx: commands.Context, *, message: str):
+    await ctx.send(message)
 
 
 # ==========================================
@@ -480,7 +637,6 @@ async def towerstats(ctx: commands.Context, game_acronym: str, roblox_username: 
                 if page_resp.status == 200:
                     html_text = await page_resp.text()
 
-                    # UPDATED SCRAPER PATTERNS
                     count_match = re.search(r'(\d+)\s*/\s*(\d+)', html_text)
                     if count_match:
                         completed_count = count_match.group(1)
