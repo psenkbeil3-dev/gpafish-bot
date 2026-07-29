@@ -1,4 +1,5 @@
 import os
+import re
 import random
 import datetime
 import aiohttp
@@ -22,6 +23,10 @@ intents.members = True
 
 bot = commands.Bot(command_prefix="-", intents=intents)
 
+# --- IN-MEMORY WARNING STORAGE ---
+# Structure: {(guild_id, user_id): ["Reason 1", "Reason 2"]}
+user_warnings = {}
+
 # --- DUMMY WEB SERVER FOR RENDER WEB SERVICE ---
 async def handle_ping(request):
     return web.Response(text="Bot is running and alive 24/7!")
@@ -43,7 +48,7 @@ async def on_ready():
     print("3. Bot is attempting to sync commands...")
     try:
         synced = await bot.tree.sync()
-        print(f"Synced {len(synced)} slash command(s).")
+        print(f"Successfully synced {len(synced)} slash command(s) globally.")
     except Exception as e:
         print(f"Error syncing commands: {e}")
     print(f'Logged in as {bot.user}')
@@ -77,18 +82,48 @@ async def ban(ctx: commands.Context, member: discord.Member, *, reason: str = "N
 @commands.guild_only()
 @commands.has_permissions(manage_messages=True)
 async def warn(ctx: commands.Context, member: discord.Member, *, reason: str = "No reason provided"):
-    embed = discord.Embed(
-        title="Member Warned",
-        description=f"**User:** {member.mention}\n**Warned By:** {ctx.author.mention}\n**Reason:** {reason}",
-        color=discord.Color.gold()
-    )
-    await ctx.send(embed=embed)
+    key = (ctx.guild.id, member.id)
+    if key not in user_warnings:
+        user_warnings[key] = []
+    
+    user_warnings[key].append(reason)
+
     try:
         await member.send(f"You have been warned in **{ctx.guild.name}** | Reason: {reason}")
     except discord.Forbidden:
         pass
 
-# 4. TIMEOUT (MUTE CHAT & VOICE)
+    await ctx.send(f"{member.mention} was warned.")
+
+# 4. SEE WARNINGS
+@bot.hybrid_command(name="warnings", aliases=["warns"], description="Shows warnings for a member.")
+@commands.guild_only()
+@commands.has_permissions(manage_messages=True)
+async def warnings(ctx: commands.Context, member: discord.Member = None):
+    target = member or ctx.author
+    key = (ctx.guild.id, target.id)
+    warns = user_warnings.get(key, [])
+
+    if not warns:
+        await ctx.send(f"**{target.display_name}** has no warnings.")
+        return
+
+    warn_list = "\n".join([f"{i+1}. {r}" for i, r in enumerate(warns)])
+    await ctx.send(f"Warnings for **{target.display_name}** ({len(warns)} total):\n{warn_list}")
+
+# 5. CLEAR WARNINGS
+@bot.hybrid_command(name="clearwarns", description="Clears all warnings for a member.")
+@commands.guild_only()
+@commands.has_permissions(manage_messages=True)
+async def clearwarns(ctx: commands.Context, member: discord.Member):
+    key = (ctx.guild.id, member.id)
+    if key in user_warnings:
+        del user_warnings[key]
+        await ctx.send(f"Cleared warnings for **{member.display_name}**.")
+    else:
+        await ctx.send(f"**{member.display_name}** has no warnings to clear.")
+
+# 6. TIMEOUT
 @bot.hybrid_command(name="timeout", description="Times out a member for a set number of minutes.")
 @commands.guild_only()
 @commands.has_permissions(moderate_members=True)
@@ -100,7 +135,7 @@ async def timeout(ctx: commands.Context, member: discord.Member, minutes: int, *
     await member.timeout(duration, reason=reason)
     await ctx.send(f"**{member.display_name}** has been timed out for {minutes} minute(s). | Reason: {reason}")
 
-# 5. UNTIMEOUT
+# 7. UNTIMEOUT
 @bot.hybrid_command(name="untimeout", description="Removes a timeout from a member.")
 @commands.guild_only()
 @commands.has_permissions(moderate_members=True)
@@ -108,7 +143,7 @@ async def untimeout(ctx: commands.Context, member: discord.Member):
     await member.timeout(None)
     await ctx.send(f"Removed timeout for **{member.display_name}**.")
 
-# 6. MUTE
+# 8. MUTE
 @bot.hybrid_command(name="mute", description="Mutes a member for a specified duration in minutes.")
 @commands.guild_only()
 @commands.has_permissions(moderate_members=True)
@@ -117,7 +152,7 @@ async def mute(ctx: commands.Context, member: discord.Member, minutes: int = 10,
     await member.timeout(duration, reason=reason)
     await ctx.send(f"**{member.display_name}** has been muted for {minutes} minutes. | Reason: {reason}")
 
-# 7. UNMUTE
+# 9. UNMUTE
 @bot.hybrid_command(name="unmute", description="Unmutes a member.")
 @commands.guild_only()
 @commands.has_permissions(moderate_members=True)
@@ -125,7 +160,7 @@ async def unmute(ctx: commands.Context, member: discord.Member):
     await member.timeout(None)
     await ctx.send(f"**{member.display_name}** has been unmuted.")
 
-# 8. DEAFEN
+# 10. DEAFEN
 @bot.hybrid_command(name="deafen", description="Server deafens a member in voice chat.")
 @commands.guild_only()
 @commands.has_permissions(deafen_members=True)
@@ -136,7 +171,7 @@ async def deafen(ctx: commands.Context, member: discord.Member, *, reason: str =
     await member.edit(deafen=True, reason=reason)
     await ctx.send(f"**{member.display_name}** has been server deafened.")
 
-# 9. UNDEAFEN
+# 11. UNDEAFEN
 @bot.hybrid_command(name="undeafen", description="Undeafens a member in voice chat.")
 @commands.guild_only()
 @commands.has_permissions(deafen_members=True)
@@ -147,7 +182,7 @@ async def undeafen(ctx: commands.Context, member: discord.Member):
     await member.edit(deafen=False)
     await ctx.send(f"**{member.display_name}** is no longer deafened.")
 
-# 10. PURGE
+# 12. PURGE
 @bot.hybrid_command(name="purge", description="Deletes a specified number of recent messages.")
 @commands.guild_only()
 @commands.has_permissions(manage_messages=True)
@@ -158,7 +193,7 @@ async def purge(ctx: commands.Context, amount: int):
     deleted = await ctx.channel.purge(limit=amount + 1)
     await ctx.send(f"Deleted **{len(deleted)-1}** messages.", delete_after=5)
 
-# 11. USERINFO
+# 13. USERINFO
 @bot.hybrid_command(name="userinfo", description="Displays information about a server member.")
 @commands.guild_only()
 async def userinfo(ctx: commands.Context, member: discord.Member = None):
@@ -202,8 +237,8 @@ async def towerstats(ctx: commands.Context, game_acronym: str, roblox_username: 
     await ctx.defer()
 
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Accept": "application/json, text/html"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8"
     }
 
     async with aiohttp.ClientSession() as session:
@@ -228,29 +263,24 @@ async def towerstats(ctx: commands.Context, game_acronym: str, roblox_username: 
             await ctx.send(f"Could not find a Roblox account named `{roblox_username}`.")
             return
 
-        api_url = f"https://www.towerstats.com/api/user?username={real_username}"
-        if TOWERSTATS_KEY:
-            headers["Authorization"] = f"Bearer {TOWERSTATS_KEY}"
-
+        towerstats_url = f"https://www.towerstats.com/etoh?username={real_username}"
         hardest = None
         completed_count = None
 
         try:
-            async with session.get(api_url, headers=headers, timeout=5) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    
-                    completions = data.get("completions") or data.get("completedTowers") or []
-                    if isinstance(completions, list):
-                        completed_count = len(completions)
-                    elif isinstance(completions, int):
-                        completed_count = completions
+            async with session.get(towerstats_url, headers=headers, timeout=8) as page_resp:
+                if page_resp.status == 200:
+                    html_text = await page_resp.text()
 
-                    hardest = data.get("hardestTower") or data.get("hardest") or data.get("hardest_tower")
-        except Exception as err:
-            print(f"[DEBUG] TowerStats API request failed: {err}")
+                    count_match = re.search(r'(\d+)\s*/\s*410', html_text)
+                    if count_match:
+                        completed_count = count_match.group(1)
 
-    towerstats_url = f"https://www.towerstats.com/etoh?username={real_username}"
+                    hardest_match = re.search(r'Hardest:?\s*<[^>]+>([^<]+)<', html_text, re.IGNORECASE)
+                    if hardest_match:
+                        hardest = hardest_match.group(1).strip()
+        except Exception as page_err:
+            print(f"[DEBUG] TowerStats HTML scrape error: {page_err}")
 
     display_completed = f"{completed_count}/410" if completed_count is not None else "N/A"
     display_hardest = hardest if hardest else "None"
