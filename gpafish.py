@@ -1,6 +1,4 @@
 import os
-import re
-import json
 import random
 import aiohttp
 import discord
@@ -84,11 +82,12 @@ async def towerstats(ctx: commands.Context, game_acronym: str, roblox_username: 
     await ctx.defer()
 
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "application/json, text/html"
     }
 
     async with aiohttp.ClientSession() as session:
-        # 1. Resolve Roblox Username to User ID
+        # 1. Look up exact username & ID via Roblox API
         roblox_api_url = "https://users.roblox.com/v1/usernames/users"
         roblox_payload = {"usernames": [roblox_username], "excludeBannedUsers": False}
         
@@ -104,62 +103,39 @@ async def towerstats(ctx: commands.Context, game_acronym: str, roblox_username: 
                         real_username = user_info.get("name", roblox_username)
                         user_id = user_info.get("id")
         except Exception as e:
-            print(f"[DEBUG] Roblox API check failed: {e}")
+            print(f"[DEBUG] Roblox lookup error: {e}")
 
-        # 2. Query TowerStats Web Page & API
-        towerstats_url = f"https://www.towerstats.com/etoh?username={real_username}"
-        api_url = f"https://www.towerstats.com/api/v1/user/{real_username}"
-        
+        if not user_id:
+            await ctx.send(f"❌ Could not find a Roblox account named `{roblox_username}`.")
+            return
+
+        # 2. Query TowerStats Direct User Data API
+        api_url = f"https://www.towerstats.com/api/user?username={real_username}"
         if TOWERSTATS_KEY:
             headers["Authorization"] = f"Bearer {TOWERSTATS_KEY}"
 
-        hardest = "Unknown"
+        hardest = None
         completed_count = None
 
-        # Try direct API fetch first
         try:
             async with session.get(api_url, headers=headers, timeout=5) as response:
                 if response.status == 200:
                     data = await response.json()
-                    hardest = data.get("hardest_tower") or data.get("hardestTower") or data.get("hardest", "Unknown")
-                    completed_count = data.get("completed_towers") or data.get("completedTowers") or data.get("completed")
+                    
+                    completions = data.get("completions") or data.get("completedTowers") or []
+                    if isinstance(completions, list):
+                        completed_count = len(completions)
+                    elif isinstance(completions, int):
+                        completed_count = completions
+
+                    hardest = data.get("hardestTower") or data.get("hardest") or data.get("hardest_tower")
         except Exception as err:
-            print(f"[DEBUG] API fetch error: {err}")
+            print(f"[DEBUG] TowerStats API request failed: {err}")
 
-        # If API returned incomplete data, fetch and parse TowerStats web page
-        if completed_count is None or hardest == "Unknown":
-            try:
-                async with session.get(towerstats_url, headers=headers, timeout=5) as page_resp:
-                    if page_resp.status == 200:
-                        html = await page_resp.text()
-                        
-                        # Extract Next.js embedded data state
-                        match = re.search(r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>', html, re.DOTALL)
-                        if match:
-                            page_data = json.loads(match.group(1))
-                            props = page_data.get("props", {}).get("pageProps", {})
-                            user_stats = props.get("user") or props.get("userData") or props.get("stats", {})
-                            
-                            if isinstance(user_stats, dict):
-                                hardest = user_stats.get("hardestTower") or user_stats.get("hardest_tower") or user_stats.get("hardest", hardest)
-                                completed_count = user_stats.get("completedTowers") or user_stats.get("completed_towers") or user_stats.get("completed", completed_count)
+    towerstats_url = f"https://www.towerstats.com/etoh?username={real_username}"
 
-                        # Regex Fallback on HTML text if JSON parsing missed keys
-                        if completed_count is None:
-                            count_match = re.search(r'Completed:\s*<b>(\d+)</b>|(\d+)\s*/\s*410', html, re.IGNORECASE)
-                            if count_match:
-                                completed_count = count_match.group(1) or count_match.group(2)
-
-                        if hardest == "Unknown":
-                            hardest_match = re.search(r'Hardest:\s*<b>([^<]+)</b>', html, re.IGNORECASE)
-                            if hardest_match:
-                                hardest = hardest_match.group(1).strip()
-            except Exception as page_err:
-                print(f"[DEBUG] HTML Parse error: {page_err}")
-
-    # Fallback default display format
-    display_completed = f"{completed_count}/410" if completed_count is not None else "0/410 (Check Page)"
-    display_hardest = hardest if hardest != "Unknown" else "None / Not Found"
+    display_completed = f"{completed_count}/410" if completed_count is not None else "Click link below to view"
+    display_hardest = hardest if hardest else "Click link below to view"
 
     embed = discord.Embed(
         title=f"🗼 {real_username}'s EToH Towerstats",
@@ -168,7 +144,7 @@ async def towerstats(ctx: commands.Context, game_acronym: str, roblox_username: 
     )
     embed.add_field(name="Hardest Completed", value=f"**{display_hardest}**", inline=False)
     embed.add_field(name="Towers Completed", value=f"**{display_completed}**", inline=False)
-    embed.set_footer(text="Game: Eternal Towers of Hell | Click title to view full TowerStats profile")
+    embed.set_footer(text="Game: Eternal Towers of Hell | Click title for full progress page")
 
     await ctx.send(embed=embed)
 
