@@ -119,31 +119,64 @@ async def towerstats(ctx: commands.Context, game_acronym: str, roblox_username: 
 
     await ctx.send(embed=embed)
 
-# --- SIKKY COMMAND ---
+# --- MEME LISTS ---
 
-SIKKY_IMAGES = [
-    "https://i.ytimg.com/vi/aL3pPzX_G6w/hqdefault.jpg",
+GD_MEMES = [
+    "https://i.ytimg.com/vi/7xQ23zshA5I/hqdefault.jpg",
     "https://i.ytimg.com/vi/3N2S4A1Xb_0/hqdefault.jpg",
-    "https://i.ytimg.com/vi/8a92mS-q_hI/hqdefault.jpg",
+    "https://i.ytimg.com/vi/aL3pPzX_G6w/hqdefault.jpg",
     "https://i.ytimg.com/vi/q_xJ1W9e_90/hqdefault.jpg",
     "https://i.ytimg.com/vi/zaRxbC3m7HM/hqdefault.jpg",
     "https://i.ytimg.com/vi/gISWceDeGxc/hqdefault.jpg",
     "https://i.ytimg.com/vi/WPhv8wPuwMo/hqdefault.jpg",
-    "https://i.ytimg.com/vi/ardXWyk_jO8/hqdefault.jpg"
+    "https://i.ytimg.com/vi/ardXWyk_jO8/hqdefault.jpg",
+    "https://i.ytimg.com/vi/8a92mS-q_hI/hqdefault.jpg",
+    "https://i.ytimg.com/vi/4vW1O1Wk44I/hqdefault.jpg",
+    "https://i.ytimg.com/vi/K5z1R4yZk6k/hqdefault.jpg",
+    "https://i.ytimg.com/vi/1_M-Y8xY34M/hqdefault.jpg"
 ]
 
-@bot.hybrid_command(name="sikky", description="Pulls up a random hilarious picture of Sikky!")
+ETOH_MEMES = [
+    "https://i.ytimg.com/vi/ATAyZGDoyRk/hqdefault.jpg",
+    "https://static.wikia.nocookie.net/jtoh/images/2/22/Ring_1_Revamp.png",
+    "https://static.wikia.nocookie.net/jtoh/images/b/b5/Tower_of_Hecc_thumbnail.png",
+    "https://i.ytimg.com/vi/pr3P0ZxVJ8I/hqdefault.jpg",
+    "https://i.ytimg.com/vi/kBdDmCPcbfs/hqdefault.jpg",
+    "https://static.wikia.nocookie.net/jtoh/images/2/23/R6_lobby_revamp_3.png",
+    "https://static.wikia.nocookie.net/jtoh/images/0/07/Tower_of_Getting_Gnomed_game_icon.png"
+]
+
+# --- GD MEMES COMMAND ---
+
+@bot.hybrid_command(name="gdmemes", description="Pulls up a random Geometry Dash meme!")
 @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
 @app_commands.allowed_installs(guilds=True, users=True)
-async def sikky(ctx: commands.Context):
-    selected_image = random.choice(SIKKY_IMAGES)
+async def gdmemes(ctx: commands.Context):
+    selected_image = random.choice(GD_MEMES)
     
     embed = discord.Embed(
-        title="🤪 Sikky Moment",
-        color=discord.Color.gold()
+        title="🔥 Geometry Dash Meme",
+        color=discord.Color.green()
     )
     embed.set_image(url=selected_image)
-    embed.set_footer(text="Geometry Dash Memes")
+    embed.set_footer(text="FIRE IN THE HOLE! 🕳️🟢")
+
+    await ctx.send(embed=embed)
+
+# --- ETOH MEMES COMMAND ---
+
+@bot.hybrid_command(name="etohmemes", description="Pulls up a random Eternal Towers of Hell meme!")
+@app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
+@app_commands.allowed_installs(guilds=True, users=True)
+async def etohmemes(ctx: commands.Context):
+    selected_image = random.choice(ETOH_MEMES)
+    
+    embed = discord.Embed(
+        title="🗼 Eternal Towers of Hell Meme",
+        color=discord.Color.purple()
+    )
+    embed.set_image(url=selected_image)
+    embed.set_footer(text="Game: Eternal Towers of Hell (EToH)")
 
     await ctx.send(embed=embed)
 
