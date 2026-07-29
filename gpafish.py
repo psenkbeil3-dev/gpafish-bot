@@ -62,7 +62,6 @@ async def on_message(message):
 # --- MODERATION COMMANDS ---
 # ==========================================
 
-# 1. KICK
 @bot.hybrid_command(name="kick", description="Kicks a member from the server.")
 @commands.guild_only()
 @commands.has_any_role("Moderator", "Admin")
@@ -73,7 +72,6 @@ async def kick(ctx: commands.Context, member: discord.Member, *, reason: str = "
     await member.kick(reason=reason)
     await ctx.send(f"**{member.display_name}** has been kicked from the server. | Reason: {reason}")
 
-# 2. BAN
 @bot.hybrid_command(name="ban", description="Bans a member from the server.")
 @commands.guild_only()
 @commands.has_any_role("Moderator", "Admin")
@@ -84,7 +82,6 @@ async def ban(ctx: commands.Context, member: discord.Member, *, reason: str = "N
     await member.ban(reason=reason)
     await ctx.send(f"**{member.display_name}** has been permanently banned. | Reason: {reason}")
 
-# 3. SOFTBAN
 @bot.hybrid_command(name="softban", description="Bans and unbans a user to clear their recent messages.")
 @commands.guild_only()
 @commands.has_any_role("Moderator", "Admin")
@@ -96,7 +93,21 @@ async def softban(ctx: commands.Context, member: discord.Member, *, reason: str 
     await ctx.guild.unban(member, reason="Softban completion.")
     await ctx.send(f"**{member.display_name}** has been softbanned (messages purged). | Reason: {reason}")
 
-# 4. WARN
+@bot.hybrid_command(name="massban", description="Bans multiple user IDs at once.")
+@commands.guild_only()
+@commands.has_any_role("Moderator", "Admin")
+async def massban(ctx: commands.Context, user_ids: str, *, reason: str = "Massban initiated."):
+    ids = user_ids.split()
+    banned_count = 0
+    for uid in ids:
+        try:
+            user = await bot.fetch_user(int(uid))
+            await ctx.guild.ban(user, reason=reason)
+            banned_count += 1
+        except Exception:
+            continue
+    await ctx.send(f"Massban action complete. Banned **{banned_count}** user(s).")
+
 @bot.hybrid_command(name="warn", description="Issues a formal warning to a member.")
 @commands.guild_only()
 @commands.has_any_role("Moderator", "Admin")
@@ -114,7 +125,6 @@ async def warn(ctx: commands.Context, member: discord.Member, *, reason: str = "
 
     await ctx.send(f"{member.mention} was warned.")
 
-# 5. WARNINGS
 @bot.hybrid_command(name="warnings", aliases=["warns"], description="Displays warning logs for a member.")
 @commands.guild_only()
 @commands.has_any_role("Moderator", "Admin")
@@ -130,7 +140,20 @@ async def warnings(ctx: commands.Context, member: discord.Member = None):
     warn_list = "\n".join([f"{i+1}. {r}" for i, r in enumerate(warns)])
     await ctx.send(f"Warning records for **{target.display_name}** ({len(warns)} total):\n{warn_list}")
 
-# 6. CLEAR WARNS
+@bot.hybrid_command(name="warnremove", description="Removes a specific warning by its index number.")
+@commands.guild_only()
+@commands.has_any_role("Moderator", "Admin")
+async def warnremove(ctx: commands.Context, member: discord.Member, index: int):
+    key = (ctx.guild.id, member.id)
+    warns = user_warnings.get(key, [])
+    
+    if not warns or index < 1 or index > len(warns):
+        await ctx.send(f"Invalid warning index for **{member.display_name}**.")
+        return
+
+    removed_reason = user_warnings[key].pop(index - 1)
+    await ctx.send(f"Removed warning #{index} (`{removed_reason}`) from **{member.display_name}**.")
+
 @bot.hybrid_command(name="clearwarns", description="Clears all recorded warnings for a member.")
 @commands.guild_only()
 @commands.has_any_role("Moderator", "Admin")
@@ -142,7 +165,6 @@ async def clearwarns(ctx: commands.Context, member: discord.Member):
     else:
         await ctx.send(f"**{member.display_name}** has no warnings to clear.")
 
-# 7. TIMEOUT
 @bot.hybrid_command(name="timeout", description="Applies a timeout to a member for a specified duration.")
 @commands.guild_only()
 @commands.has_any_role("Moderator", "Admin")
@@ -154,7 +176,6 @@ async def timeout(ctx: commands.Context, member: discord.Member, minutes: int, *
     await member.timeout(duration, reason=reason)
     await ctx.send(f"**{member.display_name}** has been timed out for {minutes} minute(s). | Reason: {reason}")
 
-# 8. UNTIMEOUT
 @bot.hybrid_command(name="untimeout", description="Removes a timeout from a member.")
 @commands.guild_only()
 @commands.has_any_role("Moderator", "Admin")
@@ -162,7 +183,6 @@ async def untimeout(ctx: commands.Context, member: discord.Member):
     await member.timeout(None)
     await ctx.send(f"Removed timeout for **{member.display_name}**.")
 
-# 9. MUTE
 @bot.hybrid_command(name="mute", description="Mutes a member for a specified duration in minutes.")
 @commands.guild_only()
 @commands.has_any_role("Moderator", "Admin")
@@ -171,7 +191,6 @@ async def mute(ctx: commands.Context, member: discord.Member, minutes: int = 10,
     await member.timeout(duration, reason=reason)
     await ctx.send(f"**{member.display_name}** has been muted for {minutes} minutes. | Reason: {reason}")
 
-# 10. UNMUTE
 @bot.hybrid_command(name="unmute", description="Unmutes a member.")
 @commands.guild_only()
 @commands.has_any_role("Moderator", "Admin")
@@ -179,7 +198,6 @@ async def unmute(ctx: commands.Context, member: discord.Member):
     await member.timeout(None)
     await ctx.send(f"**{member.display_name}** has been unmuted.")
 
-# 11. DEAFEN
 @bot.hybrid_command(name="deafen", description="Server deafens a member in voice chat.")
 @commands.guild_only()
 @commands.has_any_role("Moderator", "Admin")
@@ -190,7 +208,6 @@ async def deafen(ctx: commands.Context, member: discord.Member, *, reason: str =
     await member.edit(deafen=True, reason=reason)
     await ctx.send(f"**{member.display_name}** has been deafened in voice channels.")
 
-# 12. UNDEAFEN
 @bot.hybrid_command(name="undeafen", description="Undeafens a member in voice chat.")
 @commands.guild_only()
 @commands.has_any_role("Moderator", "Admin")
@@ -201,7 +218,6 @@ async def undeafen(ctx: commands.Context, member: discord.Member):
     await member.edit(deafen=False)
     await ctx.send(f"**{member.display_name}** is no longer deafened.")
 
-# 13. PURGE
 @bot.hybrid_command(name="purge", description="Deletes a specified number of recent messages.")
 @commands.guild_only()
 @commands.has_any_role("Moderator", "Admin")
@@ -212,7 +228,6 @@ async def purge(ctx: commands.Context, amount: int):
     deleted = await ctx.channel.purge(limit=amount + 1)
     await ctx.send(f"Successfully purged **{len(deleted)-1}** message(s).", delete_after=4)
 
-# 14. SLOWMODE
 @bot.hybrid_command(name="slowmode", description="Sets slowmode delay for the current channel in seconds.")
 @commands.guild_only()
 @commands.has_any_role("Moderator", "Admin")
@@ -226,7 +241,6 @@ async def slowmode(ctx: commands.Context, seconds: int):
     else:
         await ctx.send(f"Channel slowmode set to **{seconds}** second(s).")
 
-# 15. LOCK CHANNEL
 @bot.hybrid_command(name="lock", description="Locks down the current text channel.")
 @commands.guild_only()
 @commands.has_any_role("Moderator", "Admin")
@@ -236,7 +250,6 @@ async def lock(ctx: commands.Context):
     await ctx.channel.set_permissions(ctx.guild.default_role, overwrite=overwrite)
     await ctx.send("Channel has been locked.")
 
-# 16. UNLOCK CHANNEL
 @bot.hybrid_command(name="unlock", description="Unlocks the current text channel.")
 @commands.guild_only()
 @commands.has_any_role("Moderator", "Admin")
@@ -246,7 +259,6 @@ async def unlock(ctx: commands.Context):
     await ctx.channel.set_permissions(ctx.guild.default_role, overwrite=overwrite)
     await ctx.send("Channel has been unlocked.")
 
-# 17. NICKNAME
 @bot.hybrid_command(name="nickname", aliases=["nick"], description="Changes a member's server nickname.")
 @commands.guild_only()
 @commands.has_any_role("Moderator", "Admin")
@@ -257,7 +269,31 @@ async def nickname(ctx: commands.Context, member: discord.Member, *, nickname: s
     else:
         await ctx.send(f"Reset **{member.name}**'s nickname.")
 
-# 18. VOICE KICK
+@bot.hybrid_command(name="roleadd", description="Gives a role to a member.")
+@commands.guild_only()
+@commands.has_any_role("Moderator", "Admin")
+async def roleadd(ctx: commands.Context, member: discord.Member, role: discord.Role):
+    await member.add_roles(role)
+    await ctx.send(f"Added role **{role.name}** to **{member.display_name}**.")
+
+@bot.hybrid_command(name="roleremove", description="Removes a role from a member.")
+@commands.guild_only()
+@commands.has_any_role("Moderator", "Admin")
+async def roleremove(ctx: commands.Context, member: discord.Member, role: discord.Role):
+    await member.remove_roles(role)
+    await ctx.send(f"Removed role **{role.name}** from **{member.display_name}**.")
+
+@bot.hybrid_command(name="pin", description="Pins a specific message by Message ID.")
+@commands.guild_only()
+@commands.has_any_role("Moderator", "Admin")
+async def pin(ctx: commands.Context, message_id: str):
+    try:
+        msg = await ctx.channel.fetch_message(int(message_id))
+        await msg.pin()
+        await ctx.send("Message successfully pinned.")
+    except Exception:
+        await ctx.send("Could not locate or pin that message ID in this channel.")
+
 @bot.hybrid_command(name="vckick", description="Disconnects a member from voice chat.")
 @commands.guild_only()
 @commands.has_any_role("Moderator", "Admin")
@@ -267,6 +303,7 @@ async def vckick(ctx: commands.Context, member: discord.Member):
         return
     await member.move_to(None)
     await ctx.send(f"Disconnected **{member.display_name}** from voice chat.")
+
 
 # ==========================================
 # --- FUN & UTILITY COMMANDS ---
@@ -371,8 +408,28 @@ async def rate(ctx: commands.Context, *, subject: str):
     rating = random.randint(0, 10)
     await ctx.send(f"I would rate **{subject}** a **{rating}/10**.")
 
+@bot.hybrid_command(name="choose", description="Picks a random item from choices separated by commas.")
+async def choose(ctx: commands.Context, *, choices: str):
+    options = [opt.strip() for opt in choices.split(",") if opt.strip()]
+    if len(options) < 2:
+        await ctx.send("Please provide at least two choices separated by commas. (e.g. `-choose Pizza, Burgers`)")
+        return
+    selection = random.choice(options)
+    await ctx.send(f"I choose: **{selection}**")
+
+@bot.hybrid_command(name="ship", description="Calculates compatibility between two users.")
+async def ship(ctx: commands.Context, user1: discord.Member, user2: discord.Member = None):
+    target2 = user2 or ctx.author
+    score = random.randint(0, 100)
+    await ctx.send(f"Compatibility rating between **{user1.display_name}** and **{target2.display_name}**: **{score}%**")
+
+@bot.hybrid_command(name="reverse", description="Reverses text.")
+async def reverse(ctx: commands.Context, *, text: str):
+    await ctx.send(text[::-1])
+
+
 # ==========================================
-# --- TOWERSTATS COMMAND ---
+# --- UPDATED TOWERSTATS COMMAND ---
 # ==========================================
 
 @bot.hybrid_command(name="towerstats", description="Retrieves Roblox tower statistics.")
@@ -423,11 +480,15 @@ async def towerstats(ctx: commands.Context, game_acronym: str, roblox_username: 
                 if page_resp.status == 200:
                     html_text = await page_resp.text()
 
-                    count_match = re.search(r'(\d+)\s*/\s*410', html_text)
+                    # UPDATED SCRAPER PATTERNS
+                    count_match = re.search(r'(\d+)\s*/\s*(\d+)', html_text)
                     if count_match:
                         completed_count = count_match.group(1)
 
                     hardest_match = re.search(r'Hardest:?\s*<[^>]+>([^<]+)<', html_text, re.IGNORECASE)
+                    if not hardest_match:
+                        hardest_match = re.search(r'Hardest Tower:?\s*([A-Za-z0-9_ ]+)', html_text, re.IGNORECASE)
+
                     if hardest_match:
                         hardest = hardest_match.group(1).strip()
         except Exception as page_err:
@@ -446,6 +507,7 @@ async def towerstats(ctx: commands.Context, game_acronym: str, roblox_username: 
     embed.set_footer(text="Game: Eternal Towers of Hell")
 
     await ctx.send(embed=embed)
+
 
 # ==========================================
 # --- MEME DATA STORES & COMMANDS ---
