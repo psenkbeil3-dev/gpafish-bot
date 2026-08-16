@@ -15,6 +15,9 @@ load_dotenv()
 TOKEN = os.getenv('DISCORD_TOKEN')
 TOWERSTATS_KEY = os.getenv('TOWERSTATS_KEY')
 
+# Role ID restricted to running GD leaderboard commands
+ALLOWED_ROLE_ID = 1538631317456035850
+
 print(f"2. Token loaded: {'Yes' if TOKEN else 'NO - TOKEN IS MISSING!'}")
 
 intents = discord.Intents.default()
@@ -27,6 +30,9 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 user_warnings = {}
 # Format: {user_id: {"hardest": {"name": str, "rating": float}, "second": {"name": str, "rating": float}}}
 gd_leaderboard_data = {}
+# References to track the active leaderboard message for live updates
+gd_leaderboard_msg_id = None
+gd_leaderboard_channel_id = None
 
 # Hardcoded EVW estimations for standard RobTop main levels
 ROBTOP_LEVELS = {
@@ -66,26 +72,57 @@ async def on_ready():
         print(f"Error syncing commands: {e}")
     print(f'Logged in as {bot.user}')
 
+# Custom check to verify the required Role ID
+def has_gd_role():
+    async def predicate(ctx: commands.Context):
+        if not ctx.guild or not isinstance(ctx.author, discord.Member):
+            return False
+        if any(role.id == ALLOWED_ROLE_ID for role in ctx.author.roles):
+            return True
+        await ctx.send("You do not have permission to use this command.", ephemeral=True)
+        return False
+    return commands.check(predicate)
+
 @bot.event
 async def on_message(message):
     if message.author.bot:
         return
-    # Support for legacy !gdhardest and !gd2hardest prefixes
+
+    # Support for legacy !gdhardest, !gd2hardest, and !gddeleteboard text prefixes
     if message.content.startswith("!gdhardest"):
         ctx = await bot.get_context(message)
-        parts = message.content.split(maxsplit=2)
-        if len(parts) >= 3:
-            await gdhardest_logic(ctx, parts[1], parts[2])
+        if not any(role.id == ALLOWED_ROLE_ID for role in message.author.roles):
+            await ctx.send("You do not have permission to use this command.")
+            return
+
+        parts = message.content.split(maxsplit=3)
+        if len(parts) >= 4 and message.mentions:
+            target_user = message.mentions[0]
+            await gdhardest_logic(ctx, target_user, parts[2], parts[3])
         else:
-            await ctx.send("Usage: `!gdhardest <demon/non-demon> <level_id_or_name>`")
+            await ctx.send("Usage: `!gdhardest @User <demon/non-demon> <level_id_or_name>`")
         return
+
     elif message.content.startswith("!gd2hardest"):
         ctx = await bot.get_context(message)
-        parts = message.content.split(maxsplit=2)
-        if len(parts) >= 3:
-            await gd2hardest_logic(ctx, parts[1], parts[2])
+        if not any(role.id == ALLOWED_ROLE_ID for role in message.author.roles):
+            await ctx.send("You do not have permission to use this command.")
+            return
+
+        parts = message.content.split(maxsplit=3)
+        if len(parts) >= 4 and message.mentions:
+            target_user = message.mentions[0]
+            await gd2hardest_logic(ctx, target_user, parts[2], parts[3])
         else:
-            await ctx.send("Usage: `!gd2hardest <demon/non-demon> <level_id_or_name>`")
+            await ctx.send("Usage: `!gd2hardest @User <demon/non-demon> <level_id_or_name>`")
+        return
+
+    elif message.content.startswith("!gddeleteboard"):
+        ctx = await bot.get_context(message)
+        if not any(role.id == ALLOWED_ROLE_ID for role in message.author.roles):
+            await ctx.send("You do not have permission to use this command.")
+            return
+        await gddeleteboard_logic(ctx)
         return
 
     await bot.process_commands(message)
@@ -153,15 +190,36 @@ def render_gd_leaderboard_embed():
     embed.add_field(name="\u200b", value="\n".join(lines), inline=False)
     return embed
 
-async def gdhardest_logic(ctx, level_type: str, level_input: str):
-    user_id = ctx.author.id
+async def sync_or_create_leaderboard_message(ctx: commands.Context):
+    """Sends or edits the persistent leaderboard message in the channel."""
+    global gd_leaderboard_msg_id, gd_leaderboard_channel_id
+    
+    embed = render_gd_leaderboard_embed()
+
+    # Try editing the existing leaderboard message if recorded
+    if gd_leaderboard_msg_id and gd_leaderboard_channel_id:
+        try:
+            channel = ctx.guild.get_channel(gd_leaderboard_channel_id) or await bot.fetch_channel(gd_leaderboard_channel_id)
+            msg = await channel.fetch_message(gd_leaderboard_msg_id)
+            await msg.edit(embed=embed)
+            return
+        except Exception as e:
+            print(f"[DEBUG] Could not edit existing leaderboard message: {e}")
+
+    # If message does not exist or fetch failed, create a new one
+    msg = await ctx.send(embed=embed)
+    gd_leaderboard_msg_id = msg.id
+    gd_leaderboard_channel_id = msg.channel.id
+
+async def gdhardest_logic(ctx: commands.Context, target_user: discord.Member, level_type: str, level_input: str):
+    user_id = target_user.id
     l_type = level_type.lower()
     name, rating = None, None
 
     if l_type == "demon":
         name, rating = await fetch_gddl_info(level_input)
         if not name or rating is None:
-            await ctx.send(f"Could not find a valid GDDL demon entry for ID `{level_input}`.")
+            await ctx.send(f"Could not find a valid GDDL demon entry for ID `{level_input}`.", delete_after=5)
             return
     elif l_type in ["non-demon", "nondemon"]:
         clean_input = level_input.lower().strip()
@@ -172,7 +230,7 @@ async def gdhardest_logic(ctx, level_type: str, level_input: str):
             name = level_input.title()
             rating = 0.0
     else:
-        await ctx.send("Type must be either `demon` or `non-demon`.")
+        await ctx.send("Type must be either `demon` or `non-demon`.", delete_after=5)
         return
 
     if user_id not in gd_leaderboard_data:
@@ -186,18 +244,18 @@ async def gdhardest_logic(ctx, level_type: str, level_input: str):
 
     gd_leaderboard_data[user_id]["hardest"] = {"name": name, "rating": rating}
 
-    embed = render_gd_leaderboard_embed()
-    await ctx.send(content=f"Updated **#1 Hardest** for {ctx.author.mention} to **{name} ({rating:.2f})**!", embed=embed)
+    await sync_or_create_leaderboard_message(ctx)
+    await ctx.send(f"Updated **#1 Hardest** for {target_user.mention} to **{name} ({rating:.2f})**!", delete_after=5)
 
-async def gd2hardest_logic(ctx, level_type: str, level_input: str):
-    user_id = ctx.author.id
+async def gd2hardest_logic(ctx: commands.Context, target_user: discord.Member, level_type: str, level_input: str):
+    user_id = target_user.id
     l_type = level_type.lower()
     name, rating = None, None
 
     if l_type == "demon":
         name, rating = await fetch_gddl_info(level_input)
         if not name or rating is None:
-            await ctx.send(f"Could not find a valid GDDL demon entry for ID `{level_input}`.")
+            await ctx.send(f"Could not find a valid GDDL demon entry for ID `{level_input}`.", delete_after=5)
             return
     elif l_type in ["non-demon", "nondemon"]:
         clean_input = level_input.lower().strip()
@@ -208,7 +266,7 @@ async def gd2hardest_logic(ctx, level_type: str, level_input: str):
             name = level_input.title()
             rating = 0.0
     else:
-        await ctx.send("Type must be either `demon` or `non-demon`.")
+        await ctx.send("Type must be either `demon` or `non-demon`.", delete_after=5)
         return
 
     if user_id not in gd_leaderboard_data:
@@ -216,25 +274,50 @@ async def gd2hardest_logic(ctx, level_type: str, level_input: str):
 
     gd_leaderboard_data[user_id]["second"] = {"name": name, "rating": rating}
 
-    embed = render_gd_leaderboard_embed()
-    await ctx.send(content=f"Updated **#2 Hardest** for {ctx.author.mention} to **{name} ({rating:.2f})**!", embed=embed)
+    await sync_or_create_leaderboard_message(ctx)
+    await ctx.send(f"Updated **#2 Hardest** for {target_user.mention} to **{name} ({rating:.2f})**!", delete_after=5)
+
+async def gddeleteboard_logic(ctx: commands.Context):
+    global gd_leaderboard_msg_id, gd_leaderboard_channel_id, gd_leaderboard_data
+    
+    # Delete the leaderboard message from channel if it exists
+    if gd_leaderboard_msg_id and gd_leaderboard_channel_id:
+        try:
+            channel = ctx.guild.get_channel(gd_leaderboard_channel_id) or await bot.fetch_channel(gd_leaderboard_channel_id)
+            msg = await channel.fetch_message(gd_leaderboard_msg_id)
+            await msg.delete()
+        except Exception as e:
+            print(f"[DEBUG] Error deleting leaderboard message: {e}")
+
+    gd_leaderboard_data.clear()
+    gd_leaderboard_msg_id = None
+    gd_leaderboard_channel_id = None
+
+    await ctx.send("Leaderboard data and message have been deleted.")
 
 
-@bot.hybrid_command(name="gdhardest", description="Updates your #1 hardest GD level completion.")
+@bot.hybrid_command(name="gdhardest", description="Updates a user's #1 hardest GD level completion.")
+@has_gd_role()
 @app_commands.choices(level_type=[
     app_commands.Choice(name="Demon", value="demon"),
     app_commands.Choice(name="Non-Demon", value="non-demon")
 ])
-async def gdhardest(ctx: commands.Context, level_type: str, level_id: str):
-    await gdhardest_logic(ctx, level_type, level_id)
+async def gdhardest(ctx: commands.Context, target_user: discord.Member, level_type: str, level_id: str):
+    await gdhardest_logic(ctx, target_user, level_type, level_id)
 
-@bot.hybrid_command(name="gd2hardest", description="Updates your #2 hardest GD level completion.")
+@bot.hybrid_command(name="gd2hardest", description="Updates a user's #2 hardest GD level completion.")
+@has_gd_role()
 @app_commands.choices(level_type=[
     app_commands.Choice(name="Demon", value="demon"),
     app_commands.Choice(name="Non-Demon", value="non-demon")
 ])
-async def gd2hardest(ctx: commands.Context, level_type: str, level_id: str):
-    await gd2hardest_logic(ctx, level_type, level_id)
+async def gd2hardest(ctx: commands.Context, target_user: discord.Member, level_type: str, level_id: str):
+    await gd2hardest_logic(ctx, target_user, level_type, level_id)
+
+@bot.hybrid_command(name="gddeleteboard", description="Deletes the leaderboard data and message.")
+@has_gd_role()
+async def gddeleteboard(ctx: commands.Context):
+    await gddeleteboard_logic(ctx)
 
 
 # ==========================================
@@ -953,8 +1036,8 @@ async def etohmemes(ctx: commands.Context):
 
 @bot.event
 async def on_command_error(ctx: commands.Context, error):
-    if isinstance(error, commands.MissingRole) or isinstance(error, commands.MissingAnyRole):
-        await ctx.send("You must have the **Moderator** or **Admin** role to use this command.")
+    if isinstance(error, commands.MissingRole) or isinstance(error, commands.MissingAnyRole) or isinstance(error, commands.CheckFailure):
+        await ctx.send("You do not have permission to use this command.")
     elif isinstance(error, commands.MissingPermissions):
         await ctx.send("You do not have the required permissions to execute this command.")
     elif isinstance(error, commands.BotMissingPermissions):
