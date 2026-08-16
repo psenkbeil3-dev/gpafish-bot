@@ -21,10 +21,24 @@ intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
 
-bot = commands.Bot(command_prefix="-", intents=intents)
+bot = commands.Bot(command_prefix="!", intents=intents)
 
 # --- IN-MEMORY DATA STORES ---
 user_warnings = {}
+# Format: {user_id: {"hardest": {"name": str, "rating": float}, "second": {"name": str, "rating": float}}}
+gd_leaderboard_data = {}
+
+# Hardcoded EVW estimations for standard RobTop main levels
+ROBTOP_LEVELS = {
+    "stereo madness": 0.1, "back on track": 0.2, "polargeist": 0.4,
+    "dry out": 0.6, "base after base": 0.8, "cant let go": 1.2,
+    "jumper": 1.5, "time machine": 2.1, "cycles": 2.5,
+    "xstep": 2.8, "clutterfunk": 3.5, "theory of everything": 3.8,
+    "electroman adventures": 4.0, "clubstep": 10.2, "electrodynamix": 5.5,
+    "hexagon force": 4.8, "blast processing": 3.0, "theory of everything 2": 10.8,
+    "geometrical dominator": 4.2, "deadlocked": 11.5, "fingerdash": 4.5,
+    "dash": 5.0
+}
 
 # --- DUMMY WEB SERVER FOR RENDER WEB SERVICE ---
 async def handle_ping(request):
@@ -56,7 +70,172 @@ async def on_ready():
 async def on_message(message):
     if message.author.bot:
         return
+    # Support for legacy !gdhardest and !gd2hardest prefixes
+    if message.content.startswith("!gdhardest"):
+        ctx = await bot.get_context(message)
+        parts = message.content.split(maxsplit=2)
+        if len(parts) >= 3:
+            await gdhardest_logic(ctx, parts[1], parts[2])
+        else:
+            await ctx.send("Usage: `!gdhardest <demon/non-demon> <level_id_or_name>`")
+        return
+    elif message.content.startswith("!gd2hardest"):
+        ctx = await bot.get_context(message)
+        parts = message.content.split(maxsplit=2)
+        if len(parts) >= 3:
+            await gd2hardest_logic(ctx, parts[1], parts[2])
+        else:
+            await ctx.send("Usage: `!gd2hardest <demon/non-demon> <level_id_or_name>`")
+        return
+
     await bot.process_commands(message)
+
+
+# ==========================================
+# --- GEOMETRY DASH LEADERBOARD LOGIC ---
+# ==========================================
+
+async def fetch_gddl_info(level_id: str):
+    """Fetches level details from the GDDL (Geometry Dash Demon Ladder) API."""
+    url = f"https://gdladder.com/api/level/{level_id}"
+    async with aiohttp.ClientSession() as session:
+        try:
+            async with session.get(url, timeout=5) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    name = data.get("name", "Unknown Level")
+                    rating = data.get("rating", 0.0)
+                    return name, round(float(rating), 2)
+        except Exception as e:
+            print(f"[DEBUG] GDDL Fetch Error: {e}")
+    return None, None
+
+def render_gd_leaderboard_embed():
+    embed = discord.Embed(
+        title="Geometry Dash Leaderboard",
+        description=(
+            "Send your **top two** completions with the level name, and the "
+            "**precise rating according to GDDL**.\n"
+            "GDDL can be found here: https://gdladder.com/\n"
+            "Non Demons will be **RobTop levels only** with difficulties that are estimated by EVW.\n"
+            "*Example: Acu (20.26), Supersonic (16.86)*"
+        ),
+        color=discord.Color.dark_theme()
+    )
+
+    if not gd_leaderboard_data:
+        embed.add_field(name="Leaderboard Empty", value="No scores submitted yet!", inline=False)
+        return embed
+
+    # Sort users by their highest rating, then second highest rating
+    sorted_users = sorted(
+        gd_leaderboard_data.items(),
+        key=lambda x: (
+            x[1].get("hardest", {}).get("rating", 0.0) if x[1].get("hardest") else 0.0,
+            x[1].get("second", {}).get("rating", 0.0) if x[1].get("second") else 0.0
+        ),
+        reverse=True
+    )
+
+    lines = []
+    medals = ["🥇", "🥈", "🥉"]
+
+    for idx, (uid, data) in enumerate(sorted_users, start=1):
+        h = data.get("hardest")
+        s = data.get("second")
+
+        h_str = f"{h['name']} ({h['rating']:.2f})" if h else "None"
+        s_str = f"{s['name']} ({s['rating']:.2f})" if s else "None"
+
+        rank_prefix = medals[idx - 1] if idx <= 3 else f"{idx}"
+        lines.append(f"{rank_prefix} <@{uid}> {h_str}, {s_str}")
+
+    embed.add_field(name="\u200b", value="\n".join(lines), inline=False)
+    return embed
+
+async def gdhardest_logic(ctx, level_type: str, level_input: str):
+    user_id = ctx.author.id
+    l_type = level_type.lower()
+    name, rating = None, None
+
+    if l_type == "demon":
+        name, rating = await fetch_gddl_info(level_input)
+        if not name or rating is None:
+            await ctx.send(f"Could not find a valid GDDL demon entry for ID `{level_input}`.")
+            return
+    elif l_type in ["non-demon", "nondemon"]:
+        clean_input = level_input.lower().strip()
+        if clean_input in ROBTOP_LEVELS:
+            name = level_input.title()
+            rating = ROBTOP_LEVELS[clean_input]
+        else:
+            name = level_input.title()
+            rating = 0.0
+    else:
+        await ctx.send("Type must be either `demon` or `non-demon`.")
+        return
+
+    if user_id not in gd_leaderboard_data:
+        gd_leaderboard_data[user_id] = {"hardest": None, "second": None}
+
+    old_hardest = gd_leaderboard_data[user_id]["hardest"]
+    
+    # Push original hardest to second hardest if setting a new record
+    if old_hardest:
+        gd_leaderboard_data[user_id]["second"] = old_hardest
+
+    gd_leaderboard_data[user_id]["hardest"] = {"name": name, "rating": rating}
+
+    embed = render_gd_leaderboard_embed()
+    await ctx.send(content=f"Updated **#1 Hardest** for {ctx.author.mention} to **{name} ({rating:.2f})**!", embed=embed)
+
+async def gd2hardest_logic(ctx, level_type: str, level_input: str):
+    user_id = ctx.author.id
+    l_type = level_type.lower()
+    name, rating = None, None
+
+    if l_type == "demon":
+        name, rating = await fetch_gddl_info(level_input)
+        if not name or rating is None:
+            await ctx.send(f"Could not find a valid GDDL demon entry for ID `{level_input}`.")
+            return
+    elif l_type in ["non-demon", "nondemon"]:
+        clean_input = level_input.lower().strip()
+        if clean_input in ROBTOP_LEVELS:
+            name = level_input.title()
+            rating = ROBTOP_LEVELS[clean_input]
+        else:
+            name = level_input.title()
+            rating = 0.0
+    else:
+        await ctx.send("Type must be either `demon` or `non-demon`.")
+        return
+
+    if user_id not in gd_leaderboard_data:
+        gd_leaderboard_data[user_id] = {"hardest": None, "second": None}
+
+    gd_leaderboard_data[user_id]["second"] = {"name": name, "rating": rating}
+
+    embed = render_gd_leaderboard_embed()
+    await ctx.send(content=f"Updated **#2 Hardest** for {ctx.author.mention} to **{name} ({rating:.2f})**!", embed=embed)
+
+
+@bot.hybrid_command(name="gdhardest", description="Updates your #1 hardest GD level completion.")
+@app_commands.choices(level_type=[
+    app_commands.Choice(name="Demon", value="demon"),
+    app_commands.Choice(name="Non-Demon", value="non-demon")
+])
+async def gdhardest(ctx: commands.Context, level_type: str, level_id: str):
+    await gdhardest_logic(ctx, level_type, level_id)
+
+@bot.hybrid_command(name="gd2hardest", description="Updates your #2 hardest GD level completion.")
+@app_commands.choices(level_type=[
+    app_commands.Choice(name="Demon", value="demon"),
+    app_commands.Choice(name="Non-Demon", value="non-demon")
+])
+async def gd2hardest(ctx: commands.Context, level_type: str, level_id: str):
+    await gd2hardest_logic(ctx, level_type, level_id)
+
 
 # ==========================================
 # --- MODERATION COMMANDS ---
@@ -90,8 +269,8 @@ async def unban(ctx: commands.Context, user_id: str, *, reason: str = "No reason
         user = await bot.fetch_user(int(user_id))
         await ctx.guild.unban(user, reason=reason)
         await ctx.send(f"Successfully unbanned **{user.name}**.")
-    except Exception as e:
-        await ctx.send(f"Failed to unban user. Check the ID and try again.")
+    except Exception:
+        await ctx.send("Failed to unban user. Check the ID and try again.")
 
 @bot.hybrid_command(name="softban", description="Bans and unbans a user to clear their recent messages.")
 @commands.guild_only()
@@ -126,14 +305,11 @@ async def warn(ctx: commands.Context, member: discord.Member, *, reason: str = "
     key = (ctx.guild.id, member.id)
     if key not in user_warnings:
         user_warnings[key] = []
-    
     user_warnings[key].append(reason)
-
     try:
         await member.send(f"You were warned in **{ctx.guild.name}** | Reason: {reason}")
     except discord.Forbidden:
         pass
-
     await ctx.send(f"{member.mention} was warned.")
 
 @bot.hybrid_command(name="warnings", aliases=["warns"], description="Displays warning logs for a member.")
@@ -143,11 +319,9 @@ async def warnings(ctx: commands.Context, member: discord.Member = None):
     target = member or ctx.author
     key = (ctx.guild.id, target.id)
     warns = user_warnings.get(key, [])
-
     if not warns:
         await ctx.send(f"**{target.display_name}** has no active warnings.")
         return
-
     warn_list = "\n".join([f"{i+1}. {r}" for i, r in enumerate(warns)])
     await ctx.send(f"Warning records for **{target.display_name}** ({len(warns)} total):\n{warn_list}")
 
@@ -157,11 +331,9 @@ async def warnings(ctx: commands.Context, member: discord.Member = None):
 async def warnremove(ctx: commands.Context, member: discord.Member, index: int):
     key = (ctx.guild.id, member.id)
     warns = user_warnings.get(key, [])
-    
     if not warns or index < 1 or index > len(warns):
         await ctx.send(f"Invalid warning index for **{member.display_name}**.")
         return
-
     removed_reason = user_warnings[key].pop(index - 1)
     await ctx.send(f"Removed warning #{index} (`{removed_reason}`) from **{member.display_name}**.")
 
@@ -378,7 +550,6 @@ async def botinfo(ctx: commands.Context):
 async def userinfo(ctx: commands.Context, member: discord.Member = None):
     target = member or ctx.author
     roles = [role.mention for role in target.roles if role.name != "@everyone"]
-    
     embed = discord.Embed(
         title=f"User Information - {target.display_name}",
         color=target.color
@@ -389,7 +560,6 @@ async def userinfo(ctx: commands.Context, member: discord.Member = None):
     embed.add_field(name="Joined Server", value=target.joined_at.strftime("%b %d, %Y"), inline=False)
     embed.add_field(name="Account Created", value=target.created_at.strftime("%b %d, %Y"), inline=False)
     embed.add_field(name=f"Roles [{len(roles)}]", value=", ".join(roles) if roles else "None", inline=False)
-
     await ctx.send(embed=embed)
 
 @bot.hybrid_command(name="serverinfo", description="Displays information about the server.")
@@ -409,7 +579,6 @@ async def serverinfo(ctx: commands.Context):
     embed.add_field(name="Voice Channels", value=len(guild.voice_channels), inline=True)
     embed.add_field(name="Roles", value=len(guild.roles), inline=True)
     embed.add_field(name="Created On", value=guild.created_at.strftime("%b %d, %Y"), inline=False)
-
     await ctx.send(embed=embed)
 
 @bot.hybrid_command(name="roleinfo", description="Shows information about a specific server role.")
@@ -494,7 +663,7 @@ async def roll(ctx: commands.Context, sides: int = 6):
 async def dice(ctx: commands.Context, notation: str):
     match = re.match(r'^(\d+)d(\d+)$', notation.lower().strip())
     if not match:
-        await ctx.send("Format must be in dice notation like `2d6` or `1d20`.")
+        await ctx.send("Format must be in dice notation like `!dice 2d6` or `!dice 1d20`.")
         return
     count, sides = int(match.group(1)), int(match.group(2))
     if count > 20 or sides > 100 or count < 1 or sides < 2:
@@ -511,7 +680,6 @@ async def rps(ctx: commands.Context, choice: str):
         await ctx.send("Please choose: `rock`, `paper`, or `scissors`.")
         return
     bot_choice = random.choice(valid)
-    
     if user_choice == bot_choice:
         res = "It's a tie!"
     elif (user_choice == "rock" and bot_choice == "scissors") or \
@@ -520,17 +688,12 @@ async def rps(ctx: commands.Context, choice: str):
         res = "You win!"
     else:
         res = "I win!"
-        
     await ctx.send(f"You chose **{user_choice}**, I chose **{bot_choice}**. {res}")
 
 @bot.hybrid_command(name="poll", description="Creates a quick reaction poll.")
 @commands.guild_only()
 async def poll(ctx: commands.Context, *, question: str):
-    embed = discord.Embed(
-        title="Poll",
-        description=question,
-        color=discord.Color.blue()
-    )
+    embed = discord.Embed(title="Poll", description=question, color=discord.Color.blue())
     embed.set_footer(text=f"Initiated by {ctx.author.display_name}")
     msg = await ctx.send(embed=embed)
     await msg.add_reaction("👍")
@@ -545,7 +708,7 @@ async def rate(ctx: commands.Context, *, subject: str):
 async def choose(ctx: commands.Context, *, choices: str):
     options = [opt.strip() for opt in choices.split(",") if opt.strip()]
     if len(options) < 2:
-        await ctx.send("Please provide at least two choices separated by commas. (e.g. `-choose Pizza, Burgers`)")
+        await ctx.send("Please provide at least two choices separated by commas. (e.g. `!choose Pizza, Burgers`)")
         return
     selection = random.choice(options)
     await ctx.send(f"I choose: **{selection}**")
@@ -586,7 +749,7 @@ async def say(ctx: commands.Context, *, message: str):
 
 
 # ==========================================
-# --- UPDATED TOWERSTATS COMMAND ---
+# --- TOWERSTATS COMMAND ---
 # ==========================================
 
 @bot.hybrid_command(name="towerstats", description="Retrieves Roblox tower statistics.")
@@ -594,13 +757,11 @@ async def say(ctx: commands.Context, *, message: str):
 @app_commands.allowed_installs(guilds=True, users=True)
 async def towerstats(ctx: commands.Context, game_acronym: str, roblox_username: str):
     acronym = game_acronym.lower()
-
     if acronym != "etoh":
         await ctx.send(f"Game `{game_acronym}` is not configured yet. Currently supported: `etoh`")
         return
 
     await ctx.defer()
-
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8"
@@ -609,7 +770,6 @@ async def towerstats(ctx: commands.Context, game_acronym: str, roblox_username: 
     async with aiohttp.ClientSession() as session:
         roblox_api_url = "https://users.roblox.com/v1/usernames/users"
         roblox_payload = {"usernames": [roblox_username], "excludeBannedUsers": False}
-        
         real_username = roblox_username
         user_id = None
 
@@ -636,7 +796,6 @@ async def towerstats(ctx: commands.Context, game_acronym: str, roblox_username: 
             async with session.get(towerstats_url, headers=headers, timeout=8) as page_resp:
                 if page_resp.status == 200:
                     html_text = await page_resp.text()
-
                     count_match = re.search(r'(\d+)\s*/\s*(\d+)', html_text)
                     if count_match:
                         completed_count = count_match.group(1)
@@ -764,7 +923,6 @@ ETOH_MEMES = [
 @app_commands.allowed_installs(guilds=True, users=True)
 async def gdmemes(ctx: commands.Context):
     meme = random.choice(GD_MEMES)
-    
     embed = discord.Embed(
         title=meme["title"],
         description=meme["desc"],
@@ -772,7 +930,6 @@ async def gdmemes(ctx: commands.Context):
     )
     embed.set_image(url=meme["image"])
     embed.set_footer(text=meme["footer"])
-
     await ctx.send(embed=embed)
 
 @bot.hybrid_command(name="etohmemes", description="Pulls up an Eternal Towers of Hell meme.")
@@ -780,7 +937,6 @@ async def gdmemes(ctx: commands.Context):
 @app_commands.allowed_installs(guilds=True, users=True)
 async def etohmemes(ctx: commands.Context):
     meme = random.choice(ETOH_MEMES)
-    
     embed = discord.Embed(
         title=meme["title"],
         description=meme["desc"],
@@ -788,8 +944,8 @@ async def etohmemes(ctx: commands.Context):
     )
     embed.set_image(url=meme["image"])
     embed.set_footer(text=meme["footer"])
-
     await ctx.send(embed=embed)
+
 
 # ==========================================
 # --- ERROR HANDLING ---
