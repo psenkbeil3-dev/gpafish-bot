@@ -1,10 +1,14 @@
-import discord
-from discord.ext import commands
-from discord import app_commands
-import aiohttp
-import urllib.parse
-import json
 import os
+import json
+import urllib.parse
+import aiohttp
+import discord
+from discord import app_commands
+from discord.ext import commands
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 # --- Bot Initialization & Configuration ---
 intents = discord.Intents.default()
@@ -14,20 +18,35 @@ intents.members = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 ALLOWED_ROLE_ID = 123456789012345678      # Replace with your moderator/GD role ID
-LEADERBOARD_CHANNEL_ID = 123456789012345678  # Replace with your leaderboard channel ID
+LEADERBOARD_CHANNEL_ID = 123456789012345678  # Replace with your target leaderboard channel ID
 DATA_FILE = "gd_leaderboard.json"
 
 gd_leaderboard_data = {}
 
-# EVW Estimation Ratings for Main/RobTop Levels
+# EVW / Community Tier Ratings for Main RobTop Levels
 ROBTOP_LEVELS = {
-    "stereo madness": 0.10, "back on track": 0.20, "polargeist": 0.30,
-    "dry out": 0.40, "base after base": 0.50, "cant let go": 0.60,
-    "jumper": 0.70, "time machine": 0.80, "cycles": 0.90,
-    "xstep": 1.00, "clutterfunk": 1.20, "theory of everything": 1.10,
-    "electroman adventures": 1.15, "electrodynamix": 1.60, "hexagon force": 1.40,
-    "blast processing": 0.85, "geometrical dominator": 1.05, "fingerdash": 1.30,
-    "dash": 1.25
+    "stereo madness": 0.10,
+    "back on track": 0.20,
+    "polargeist": 0.30,
+    "dry out": 0.40,
+    "base after base": 0.50,
+    "cant let go": 0.60,
+    "jumper": 0.70,
+    "time machine": 0.80,
+    "cycles": 0.90,
+    "xstep": 1.00,
+    "clutterfunk": 1.20,
+    "theory of everything": 1.10,
+    "electroman adventures": 1.15,
+    "electrodynamix": 1.60,
+    "hexagon force": 1.40,
+    "blast processing": 0.85,
+    "geometrical dominator": 1.05,
+    "fingerdash": 1.30,
+    "dash": 1.25,
+    "clubstep": 2.10,
+    "theory of everything 2": 2.40,
+    "deadlocked": 2.80,
 }
 
 
@@ -39,14 +58,21 @@ def load_data():
             try:
                 raw_data = json.load(f)
                 gd_leaderboard_data = {int(k): v for k, v in raw_data.items()}
+                print(f"[DATA] Loaded {len(gd_leaderboard_data)} leaderboard record(s).")
             except Exception as e:
-                print(f"[ERROR] Failed to load data: {e}")
+                print(f"[ERROR] Failed to load data file: {e}")
                 gd_leaderboard_data = {}
+    else:
+        gd_leaderboard_data = {}
 
 
 def save_data():
-    with open(DATA_FILE, "w") as f:
-        json.dump(gd_leaderboard_data, f, indent=4)
+    try:
+        with open(DATA_FILE, "w") as f:
+            json.dump(gd_leaderboard_data, f, indent=4)
+        print("[DATA] Saved updated leaderboard data.")
+    except Exception as e:
+        print(f"[ERROR] Failed to save data: {e}")
 
 
 def has_gd_role():
@@ -57,14 +83,15 @@ def has_gd_role():
             "You do not have permission to use this command.", ephemeral=True
         )
         return False
+
     return app_commands.check(predicate)
 
 
-# --- API Fetcher (GDDL & GDBrowser) ---
+# --- API Fetcher Engine ---
 async def fetch_gddl_info(level_input: str):
     headers = {"User-Agent": "Mozilla/5.0"}
     async with aiohttp.ClientSession(headers=headers) as session:
-        # Case 1: Level ID Search
+        # Strategy A: Level ID Lookup
         if level_input.isdigit():
             level_id = level_input
             gddl_url = f"https://gdladder.com/api/level/{level_id}"
@@ -83,8 +110,8 @@ async def fetch_gddl_info(level_input: str):
                             )
                             if raw_tier is not None:
                                 rating = float(raw_tier)
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"[API WARN] GDDL ID Lookup failed: {e}")
 
             if not name:
                 try:
@@ -93,12 +120,13 @@ async def fetch_gddl_info(level_input: str):
                         if resp.status == 200:
                             gd_data = await resp.json()
                             name = gd_data.get("name", f"Level {level_id}")
-                except Exception:
+                except Exception as e:
+                    print(f"[API WARN] GDBrowser ID Lookup failed: {e}")
                     name = f"Level {level_id}"
 
             return name, round(rating, 2)
 
-        # Case 2: Level Name Search
+        # Strategy B: Search Level by Name
         search_url = f"https://gdladder.com/api/level/search?name={urllib.parse.quote(level_input)}"
         try:
             async with session.get(search_url, timeout=5) as resp:
@@ -119,9 +147,10 @@ async def fetch_gddl_info(level_input: str):
                         )
                         rating = float(raw_tier) if raw_tier is not None else 0.0
                         return name, round(rating, 2)
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[API WARN] GDDL Search failed: {e}")
 
+        # Strategy C: GDBrowser Fallback Search
         try:
             gd_search_url = f"https://gdbrowser.com/api/search/{urllib.parse.quote(level_input)}"
             async with session.get(gd_search_url, timeout=5) as resp:
@@ -129,8 +158,8 @@ async def fetch_gddl_info(level_input: str):
                     gd_results = await resp.json()
                     if isinstance(gd_results, list) and len(gd_results) > 0:
                         return gd_results[0].get("name", level_input.title()), 0.0
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[API WARN] GDBrowser Search failed: {e}")
 
     return level_input.title(), 0.0
 
@@ -141,7 +170,6 @@ async def build_leaderboard_embed():
         title="🏆 GD Hardest Levels Leaderboard 🏆", color=discord.Color.gold()
     )
 
-    # Sort users by their #1 level rating descending
     sorted_users = sorted(
         gd_leaderboard_data.items(),
         key=lambda item: (
@@ -185,6 +213,7 @@ async def build_leaderboard_embed():
 async def sync_or_create_leaderboard_message(ctx_or_interaction):
     channel = bot.get_channel(LEADERBOARD_CHANNEL_ID)
     if not channel:
+        print(f"[ERROR] Leaderboard channel {LEADERBOARD_CHANNEL_ID} not found.")
         return
 
     embed = await build_leaderboard_embed()
@@ -198,7 +227,7 @@ async def sync_or_create_leaderboard_message(ctx_or_interaction):
     await channel.send(embed=embed)
 
 
-# --- Command Logic Core ---
+# --- Core Command Implementations ---
 async def gdhardest_logic(
     ctx,
     target_user: discord.Member,
@@ -212,13 +241,11 @@ async def gdhardest_logic(
 
     name = fetched_name if fetched_name else level_input.title()
 
-    # Manual tier input takes priority over API
     if tier_rating is not None and tier_rating > 0.0:
         rating = float(tier_rating)
     else:
         rating = fetched_rating
 
-    # Handle Non-Demon RobTop fallback
     if l_type in ["non-demon", "nondemon"] and rating == 0.0:
         clean_input = level_input.lower().strip()
         if clean_input in ROBTOP_LEVELS:
@@ -227,7 +254,6 @@ async def gdhardest_logic(
     if user_id not in gd_leaderboard_data:
         gd_leaderboard_data[user_id] = {"hardest": None, "second": None}
 
-    # Shift current hardest to #2 if replacing
     old_hardest = gd_leaderboard_data[user_id]["hardest"]
     if old_hardest:
         gd_leaderboard_data[user_id]["second"] = old_hardest
@@ -238,10 +264,11 @@ async def gdhardest_logic(
     }
 
     await sync_or_create_leaderboard_message(ctx)
-    await ctx.send(
-        f"Updated **#1 Hardest** for {target_user.mention} to **{name} ({rating:.2f})**!",
-        delete_after=5,
-    )
+    if hasattr(ctx, "send"):
+        await ctx.send(
+            f"Updated **#1 Hardest** for {target_user.mention} to **{name} ({rating:.2f})**!",
+            delete_after=5,
+        )
 
 
 async def gd2hardest_logic(
@@ -276,10 +303,11 @@ async def gd2hardest_logic(
     }
 
     await sync_or_create_leaderboard_message(ctx)
-    await ctx.send(
-        f"Updated **#2 Hardest** for {target_user.mention} to **{name} ({rating:.2f})**!",
-        delete_after=5,
-    )
+    if hasattr(ctx, "send"):
+        await ctx.send(
+            f"Updated **#2 Hardest** for {target_user.mention} to **{name} ({rating:.2f})**!",
+            delete_after=5,
+        )
 
 
 # --- Slash Commands ---
@@ -386,7 +414,7 @@ async def gdprofile(ctx: commands.Context, target_user: discord.Member = None):
 )
 @has_gd_role()
 async def gdrefresh(ctx: commands.Context):
-    await sync_or_createleaderboard_message(ctx)
+    await sync_or_create_leaderboard_message(ctx)
     await ctx.send("Leaderboard refreshed!", delete_after=5)
 
 
@@ -464,15 +492,28 @@ async def on_message(message: discord.Message):
     await bot.process_commands(message)
 
 
-# --- Startup Event ---
+# --- Startup & Execution Engine ---
 @bot.event
 async def on_ready():
     load_data()
     try:
         synced = await bot.tree.sync()
-        print(f"Synced {len(synced)} slash command(s).")
+        print(f"[BOOT] Synced {len(synced)} slash command(s).")
     except Exception as e:
-        print(f"Failed to sync slash commands: {e}")
-    print(f"Bot online as {bot.user}")
+        print(f"[BOOT ERROR] Failed to sync slash commands: {e}")
+    print(f"[ONLINE] Bot logged in as {bot.user} (ID: {bot.user.id})")
 
-# bot.run("YOUR_BOT_TOKEN")
+
+if __name__ == "__main__":
+    # Tries retrieving 'DISCORD_TOKEN' first, then 'BOT_TOKEN' as a fallback
+    TOKEN = os.getenv("DISCORD_TOKEN") or os.getenv("BOT_TOKEN")
+
+    if not TOKEN:
+        print(
+            "[CRITICAL] No bot token found! Ensure DISCORD_TOKEN is set in your environment variables."
+        )
+    else:
+        try:
+            bot.run(TOKEN)
+        except Exception as e:
+            print(f"[CRITICAL ERROR] Failed to initialize bot session: {e}")
