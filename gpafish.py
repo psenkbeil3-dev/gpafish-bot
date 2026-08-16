@@ -2,6 +2,7 @@ import os
 import re
 import random
 import datetime
+import urllib.parse
 import aiohttp
 import discord
 from discord import app_commands
@@ -132,19 +133,40 @@ async def on_message(message):
 # --- GEOMETRY DASH LEADERBOARD LOGIC ---
 # ==========================================
 
-async def fetch_gddl_info(level_id: str):
-    """Fetches level details from the GDDL (Geometry Dash Demon Ladder) API."""
-    url = f"https://gdladder.com/api/level/{level_id}"
+async def fetch_gddl_info(level_input: str):
+    """
+    Fetches level details and tier rating from the GDDL API.
+    Handles numeric Level IDs as well as Level Name searches.
+    """
     async with aiohttp.ClientSession() as session:
+        # Case 1: Numeric Level ID search
+        if level_input.isdigit():
+            url = f"https://gdladder.com/api/level/{level_input}"
+            try:
+                async with session.get(url, timeout=5) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        name = data.get("name", "Unknown Level")
+                        rating = data.get("rating", 0.0)
+                        return name, round(float(rating), 2)
+            except Exception as e:
+                print(f"[DEBUG] GDDL ID Fetch Error: {e}")
+
+        # Case 2: Level Name search query
+        search_url = f"https://gdladder.com/api/level/search?name={urllib.parse.quote(level_input)}"
         try:
-            async with session.get(url, timeout=5) as resp:
+            async with session.get(search_url, timeout=5) as resp:
                 if resp.status == 200:
                     data = await resp.json()
-                    name = data.get("name", "Unknown Level")
-                    rating = data.get("rating", 0.0)
-                    return name, round(float(rating), 2)
+                    results = data if isinstance(data, list) else data.get("levels", [])
+                    if results:
+                        first_match = results[0]
+                        name = first_match.get("name", level_input.title())
+                        rating = first_match.get("rating", 0.0)
+                        return name, round(float(rating), 2)
         except Exception as e:
-            print(f"[DEBUG] GDDL Fetch Error: {e}")
+            print(f"[DEBUG] GDDL Name Search Error: {e}")
+
     return None, None
 
 def render_gd_leaderboard_embed():
@@ -219,7 +241,7 @@ async def gdhardest_logic(ctx: commands.Context, target_user: discord.Member, le
     if l_type == "demon":
         name, rating = await fetch_gddl_info(level_input)
         if not name or rating is None:
-            await ctx.send(f"Could not find a valid GDDL demon entry for ID `{level_input}`.", delete_after=5)
+            await ctx.send(f"Could not find a valid GDDL demon entry for `{level_input}`.", delete_after=5)
             return
     elif l_type in ["non-demon", "nondemon"]:
         clean_input = level_input.lower().strip()
@@ -255,7 +277,7 @@ async def gd2hardest_logic(ctx: commands.Context, target_user: discord.Member, l
     if l_type == "demon":
         name, rating = await fetch_gddl_info(level_input)
         if not name or rating is None:
-            await ctx.send(f"Could not find a valid GDDL demon entry for ID `{level_input}`.", delete_after=5)
+            await ctx.send(f"Could not find a valid GDDL demon entry for `{level_input}`.", delete_after=5)
             return
     elif l_type in ["non-demon", "nondemon"]:
         clean_input = level_input.lower().strip()
@@ -302,8 +324,8 @@ async def gddeleteboard_logic(ctx: commands.Context):
     app_commands.Choice(name="Demon", value="demon"),
     app_commands.Choice(name="Non-Demon", value="non-demon")
 ])
-async def gdhardest(ctx: commands.Context, target_user: discord.Member, level_type: str, level_id: str):
-    await gdhardest_logic(ctx, target_user, level_type, level_id)
+async def gdhardest(ctx: commands.Context, target_user: discord.Member, level_type: str, level_input: str):
+    await gdhardest_logic(ctx, target_user, level_type, level_input)
 
 @bot.hybrid_command(name="gd2hardest", description="Updates a user's #2 hardest GD level completion.")
 @has_gd_role()
@@ -311,8 +333,8 @@ async def gdhardest(ctx: commands.Context, target_user: discord.Member, level_ty
     app_commands.Choice(name="Demon", value="demon"),
     app_commands.Choice(name="Non-Demon", value="non-demon")
 ])
-async def gd2hardest(ctx: commands.Context, target_user: discord.Member, level_type: str, level_id: str):
-    await gd2hardest_logic(ctx, target_user, level_type, level_id)
+async def gd2hardest(ctx: commands.Context, target_user: discord.Member, level_type: str, level_input: str):
+    await gd2hardest_logic(ctx, target_user, level_type, level_input)
 
 @bot.hybrid_command(name="gddeleteboard", description="Deletes the leaderboard data and message.")
 @has_gd_role()
