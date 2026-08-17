@@ -32,8 +32,8 @@ intents.members = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-ALLOWED_ROLE_ID = 123456789012345678      # Replace with your actual Moderator/GD Role ID
-LEADERBOARD_CHANNEL_ID = 123456789012345678  # Replace with your actual Leaderboard Channel ID
+ALLOWED_ROLE_ID = 1538631317456035850      # Replace with your actual Moderator/GD Role ID
+LEADERBOARD_CHANNEL_ID = 1320077863348600973  # Replace with your actual Leaderboard Channel ID
 DATA_FILE = "gd_leaderboard.json"
 
 gd_leaderboard_data = {}
@@ -177,6 +177,7 @@ async def build_leaderboard_embed():
         h_str = f"**{hardest['name']}** (Tier {hardest['rating']:.2f})" if hardest else "None"
         s_str = f"**{second['name']}** (Tier {second['rating']:.2f})" if second else "None"
 
+        # Displays user standard mention on main leaderboard embed
         lines.append(f"**#{rank}** <@{user_id}>\n> 🥇 **#1:** {h_str}\n> 🥈 **#2:** {s_str}\n")
 
     embed.description = "\n".join(lines)
@@ -225,7 +226,7 @@ async def gdhardest_logic(ctx, target_user: discord.Member, level_type: str, lev
 
     await sync_or_create_leaderboard_message(ctx)
     if hasattr(ctx, "send"):
-        await ctx.send(f"Updated **#1 Hardest** for {target_user.mention} to **{name} ({rating:.2f})**!", delete_after=5)
+        await ctx.send(f"Updated **#1 Hardest** for **{target_user.display_name}** to **{name} ({rating:.2f})**!", delete_after=5)
 
 
 async def gd2hardest_logic(ctx, target_user: discord.Member, level_type: str, level_input: str, tier_rating: float = None):
@@ -248,7 +249,7 @@ async def gd2hardest_logic(ctx, target_user: discord.Member, level_type: str, le
 
     await sync_or_create_leaderboard_message(ctx)
     if hasattr(ctx, "send"):
-        await ctx.send(f"Updated **#2 Hardest** for {target_user.mention} to **{name} ({rating:.2f})**!", delete_after=5)
+        await ctx.send(f"Updated **#2 Hardest** for **{target_user.display_name}** to **{name} ({rating:.2f})**!", delete_after=5)
 
 
 # --- Slash Commands ---
@@ -279,9 +280,9 @@ async def gdremove(ctx: commands.Context, target_user: discord.Member):
     if user_id in gd_leaderboard_data:
         del gd_leaderboard_data[user_id]
         await sync_or_create_leaderboard_message(ctx)
-        await ctx.send(f"Removed {target_user.mention} from the leaderboard.", delete_after=5)
+        await ctx.send(f"Removed **{target_user.display_name}** from the leaderboard.", delete_after=5)
     else:
-        await ctx.send(f"{target_user.mention} is not currently on the leaderboard.", delete_after=5)
+        await ctx.send(f"**{target_user.display_name}** is not currently on the leaderboard.", delete_after=5)
 
 
 @bot.hybrid_command(name="gdprofile", description="Shows the GD hardest levels for a specific user.")
@@ -290,7 +291,7 @@ async def gdprofile(ctx: commands.Context, target_user: discord.Member = None):
     data = gd_leaderboard_data.get(user.id)
 
     if not data or (not data.get("hardest") and not data.get("second")):
-        await ctx.send(f"No records found for {user.mention}.", delete_after=10)
+        await ctx.send(f"No records found for **{user.display_name}**.", delete_after=10)
         return
 
     embed = discord.Embed(title=f"🎮 GD Profile: {user.display_name}", color=discord.Color.blue())
