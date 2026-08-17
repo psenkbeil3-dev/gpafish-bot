@@ -32,8 +32,8 @@ intents.members = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-ALLOWED_ROLE_ID = 1538631317456035850      # Replace with your actual Moderator/GD Role ID
-LEADERBOARD_CHANNEL_ID = 1320077863348600973  # Replace with your actual Leaderboard Channel ID
+ALLOWED_ROLE_ID = 123456789012345678      # Replace with your actual Moderator/GD Role ID
+LEADERBOARD_CHANNEL_ID = 123456789012345678  # Replace with your actual Leaderboard Channel ID
 DATA_FILE = "gd_leaderboard.json"
 
 gd_leaderboard_data = {}
@@ -152,8 +152,15 @@ async def fetch_gddl_info(level_input: str):
 
 
 # --- Leaderboard Rendering ---
-async def build_leaderboard_embed():
-    embed = discord.Embed(title="🏆 GD Hardest Levels Leaderboard 🏆", color=discord.Color.gold())
+def build_leaderboard_content():
+    # Header instructions matching exact format
+    header = (
+        "**Geometry Dash Leaderboard**\n"
+        "Send your *top two* completions with the level name, and the **precise rating according to GDDL**.\n"
+        "GDDL can be found here: https://gdladder.com/\n"
+        "Non Demons will be **RobTop levels only** with difficulties that are estimated by EVW.\n"
+        "Example: Acu (20.26), Supersonic (16.86)\n\n"
+    )
 
     sorted_users = sorted(
         gd_leaderboard_data.items(),
@@ -166,22 +173,31 @@ async def build_leaderboard_embed():
     )
 
     if not sorted_users:
-        embed.description = "No entries yet! Use `/gdhardest` to add your scores."
-        return embed
+        return header + "*No entries yet! Use `/gdhardest` to add your scores.*"
 
     lines = []
+    medals = {1: "🥇", 2: "🥈", 3: "🥉"}
+
     for rank, (user_id, data) in enumerate(sorted_users, start=1):
         hardest = data.get("hardest")
         second = data.get("second")
 
-        h_str = f"**{hardest['name']}** (Tier {hardest['rating']:.2f})" if hardest else "None"
-        s_str = f"**{second['name']}** (Tier {second['rating']:.2f})" if second else "None"
+        # Format individual level strings
+        level_strs = []
+        if hardest:
+            level_strs.append(f"{hardest['name']} ({hardest['rating']:.2f})")
+        if second:
+            level_strs.append(f"{second['name']} ({second['rating']:.2f})")
 
-        # Displays user standard mention on main leaderboard embed
-        lines.append(f"**#{rank}** <@{user_id}>\n> 🥇 **#1:** {h_str}\n> 🥈 **#2:** {s_str}\n")
+        levels_formatted = ", ".join(level_strs) if level_strs else "None"
 
-    embed.description = "\n".join(lines)
-    return embed
+        # Determine rank badge icon
+        badge = medals.get(rank, f"{rank}")
+
+        # Construct concise single-line format
+        lines.append(f"{badge} <@{user_id}> {levels_formatted}")
+
+    return header + "\n".join(lines)
 
 
 async def sync_or_create_leaderboard_message(ctx_or_interaction):
@@ -190,15 +206,15 @@ async def sync_or_create_leaderboard_message(ctx_or_interaction):
         print(f"[ERROR] Leaderboard channel {LEADERBOARD_CHANNEL_ID} not found.")
         return
 
-    embed = await build_leaderboard_embed()
+    content = build_leaderboard_content()
     save_data()
 
     async for message in channel.history(limit=20):
-        if message.author == bot.user and message.embeds:
-            await message.edit(embed=embed)
+        if message.author == bot.user:
+            await message.edit(content=content, embed=None)
             return
 
-    await channel.send(embed=embed)
+    await channel.send(content=content)
 
 
 # --- Core Logic Implementations ---
@@ -321,8 +337,8 @@ async def gdinfo(ctx: commands.Context, level_input: str):
 
 @bot.hybrid_command(name="leaderboard", description="Displays the full GD leaderboard.")
 async def leaderboard(ctx: commands.Context):
-    embed = await build_leaderboard_embed()
-    await ctx.send(embed=embed)
+    content = build_leaderboard_content()
+    await ctx.send(content=content)
 
 
 @bot.hybrid_command(name="ping", description="Checks the bot's latency.")
